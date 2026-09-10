@@ -30,7 +30,7 @@ export function createLlmModel() {
         default:
             return new ChatGoogleGenerativeAI({
                 apiKey: process.env.GOOGLE_API_KEY || "",
-                model: process.env.MODEL_NAME || "gemini-2.5-flash",
+                model: process.env.MODEL_NAME || "gemini-3.1-flash-lite",
             });
     }
 }

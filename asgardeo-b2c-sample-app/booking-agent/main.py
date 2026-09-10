@@ -73,7 +73,7 @@ def _resolve_wayfinder_mcp_url() -> str:
 
 
 WAYFINDER_MCP_SERVER_URL = _resolve_wayfinder_mcp_url()
-MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.5-flash")
+MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3.1-flash-lite-flash")
 logger.info("WayFinder MCP server URL: %s", WAYFINDER_MCP_SERVER_URL)
 
 # Cap on chat-history turns replayed to the model per request (user+assistant = 1 turn).
