@@ -262,7 +262,7 @@ function SiteFooter({ authReady }) {
           </span>
           <span>Wayfinder</span>
         </Link>
-        <p>Modern travel booking flows, secured with Asgardeo.</p>
+        <p>Modern travel booking flows, secured with the Identity Platform.</p>
       </div>
       <FooterLinks authReady={authReady} />
     </footer>
@@ -583,7 +583,7 @@ function App({ authReady }) {
         <div className="setup-banner" role="status">
           <ShieldCheck size={18} />
           Add `VITE_ASGARDEO_CLIENT_ID` and `VITE_ASGARDEO_BASE_URL` to enable live
-          Asgardeo sign in, sign up, and sign out.
+          Identity Platform sign in, sign up, and sign out.
         </div>
       )}
 

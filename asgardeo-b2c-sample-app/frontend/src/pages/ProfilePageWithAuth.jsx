@@ -206,9 +206,9 @@ export function ProfilePageWithAuth() {
       setProfile(displayProfile);
       setDraftProfile(displayProfile);
       setIsEditing(false);
-      setStatusMessage("Profile updated in Asgardeo.");
+      setStatusMessage("Profile updated in the Identity Platform.");
     } catch (error) {
-      setErrorMessage(error.message || "Unable to update your profile in Asgardeo.");
+      setErrorMessage(error.message || "Unable to update your profile in the Identity Platform.");
     }
   }
 
