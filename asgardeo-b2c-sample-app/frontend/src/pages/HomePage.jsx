@@ -16,13 +16,13 @@ import {
 import { apiQueryKeys, useApiAuth } from "../api-queries";
 import { getFlight } from "../api";
 import { SearchPanel } from "../components/SearchPanel";
-import { ASGARDEO_CLIENT_ID, getCDSProfile } from "../cds-api";
+import { ASGARDEO_APPLICATION_ID, getCDSProfile } from "../cds-api";
 import { buildFlightDetailsPath } from "../utils/routes";
 
 function extractFavoriteFlightIds(profile) {
   const normalizedProfile = profile?.data || profile?.profile || profile || {};
   const applicationData = normalizedProfile?.application_data || normalizedProfile?.applicationData || {};
-  const appScopedFavorites = applicationData?.[ASGARDEO_CLIENT_ID]?.fav_flights;
+  const appScopedFavorites = applicationData?.[ASGARDEO_APPLICATION_ID]?.fav_flights;
 
   if (Array.isArray(appScopedFavorites)) {
     return appScopedFavorites.map((id) => `${id}`);

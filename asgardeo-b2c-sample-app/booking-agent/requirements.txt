@@ -5,6 +5,7 @@ asgardeo_ai==0.2.2
 langchain>=1.2.11
 langchain-google-genai==3.2.0
 langchain-mcp-adapters==0.1.14
+mcp>=1.9.2,<2
 python-dotenv~=1.0.0
 httpx~=0.28.0
 PyJWT[crypto]>=2.12.0
