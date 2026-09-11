@@ -51,7 +51,9 @@ dotenv.config({
 });
 
 const logger = createLogger();
-const defaultAgentScopes = "openid profile deal-alert-consents:read";
+// This agent's own role grants only the consent read. Acting on a match --
+// booking and cancelling -- requires the user's approval via CIBA.
+const defaultAgentScopes = "openid profile mcp:deal-alert-consents:read";
 const port = Number(process.env.PORT || process.env.AGENT_PORT || 8790);
 const host = process.env.HOST || "localhost";
 const webhookPath = process.env.NEW_FLIGHT_WEBHOOK_PATH || process.env.DEAL_ALERT_WEBHOOK_PATH || "/deal-alerts";

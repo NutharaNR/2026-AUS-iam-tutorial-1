@@ -39,8 +39,12 @@ async def get_authorization_url(agent_auth: AgentAuth) -> tuple:
     async with AgentAuthManager(
         agent_auth.asgardeo_config, agent_auth.agent_config
     ) as auth_manager:
+        # The resource must be sent on /authorize as well as /token: Asgardeo binds
+        # API-resource scopes to their resource, and it also determines the token's
+        # audience. OBO_RESOURCE must therefore name the resource that OWNS the
+        # mcp:* scopes — the same value the MCP server accepts as ASGARDEO_AUDIENCE.
         auth_url, state, code_verifier = auth_manager.get_authorization_url_with_pkce(
-            OBO_SCOPES
+            OBO_SCOPES, resource=OBO_RESOURCE
         )
 
     logger.info("Generated PKCE authorization URL for OBO flow")

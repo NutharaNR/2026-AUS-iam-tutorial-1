@@ -6,15 +6,36 @@ The AI agent connects to this server over Streamable HTTP at `/mcp`. The MCP ser
 
 ## Tools
 
-- `search_flights`: Calls `GET /api/flights`.
-- `search_hotels`: Calls `GET /api/hotels`.
-- `get_trips`: Calls `GET /api/trips`.
-- `get_locations`: Calls `GET /api/locations`.
-- `create_booking`: Calls `POST /api/bookings`.
-- `get_flight_bookings`: Calls `GET /api/bookings/flights`.
-- `get_profile`: Calls `GET /api/me`.
-- `store_deal_alert_consent`: Calls `POST /api/deal-alert-consents`.
-- `list_deal_alert_consents`: Calls `GET /api/deal-alert-consents` so the ambient agent can compare new flights with enabled consent candidates.
+Tools read and write the Wayfinder database in process. The REST API still
+serves the browser and opens the same SQLite file.
+
+Each tool is gated on a `mcp:`-namespaced scope, verified against the bearer
+token at the MCP boundary when `MCP_REQUIRE_AUTH=true`. Tools with no scope
+listed still require a valid token, but no particular scope.
+
+| Tool | Required scope |
+| --- | --- |
+| `search_flights` | `mcp:search_flights` |
+| `get_locations` | `mcp:get_locations` |
+| `create_booking` | `mcp:create_bookings` |
+| `list_deal_alert_consents` | `mcp:deal-alert-consents:read` |
+| `cancel_booking` | `mcp:create_bookings` |
+| `transfer_deal_alert_consent` | `mcp:deal-alert-consents:write` |
+| `search_hotels` | — |
+| `get_trips` | — |
+| `get_flight_bookings` | — |
+
+`create_booking`, `get_flight_bookings`, `cancel_booking` and
+`transfer_deal_alert_consent` derive the acting user from the verified token
+alone, never from a tool argument. Cancelling or transferring refuses a booking
+owned by anyone else, and does not distinguish "not found" from "not yours".
+
+`list_deal_alert_consents` returns every user's enabled consents so the ambient
+agent can match a new flight against all watchers. It is the widest read on the
+surface; keep it scoped to the ambient agent.
+
+Recording a deal-alert consent is not an MCP tool: the frontend posts it to the
+REST API directly with the signed-in user's own token.
 
 ## Local Configuration
 

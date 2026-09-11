@@ -171,17 +171,7 @@ export async function logOperation<T>({
     }
 }
 
-function summarizeToolArgs(toolName: string, args: Record<string, unknown>) {
-    if (toolName === "store_deal_alert_consent") {
-        return {
-            bookingId: args.bookingId,
-            routeFrom: args.routeFrom,
-            routeTo: args.routeTo,
-            enabled: args.enabled,
-            hasCriteria: Boolean(args.criteria),
-        };
-    }
-
+function summarizeToolArgs(_toolName: string, args: Record<string, unknown>) {
     return args;
 }
 

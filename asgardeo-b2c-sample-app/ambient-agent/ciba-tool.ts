@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+import { randomUUID } from "node:crypto";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { createLogger } from "./logger.js";
@@ -65,97 +66,90 @@ function getCibaAuthorizationHeader() {
     return `Basic ${encodedCredentials}`;
 }
 
-function getApiBaseUrl() {
-    return process.env.API_BASE_URL || "http://localhost:8787";
+function getMcpServerUrl() {
+    return process.env.MCP_SERVER_URL || "http://localhost:8000/mcp";
 }
 
-async function requestApi(
-    path: string,
-    options: RequestInit,
-    requestLogger: Logger,
-) {
-    const headers = new Headers(options.headers);
-    const baseUrl = getApiBaseUrl();
-    const apiLogger = requestLogger.child({
-        upstream: "travel-api",
-        upstreamMethod: options.method || "GET",
-        upstreamPath: path,
-    });
-
-    headers.set("Accept", "application/json");
-
-    if (options.body && !headers.has("Content-Type")) {
-        headers.set("Content-Type", "application/json");
-    }
-
-    apiLogger.info({
-        hasAuthorization: headers.has("Authorization"),
-    }, "API request started");
-
-    const response = await fetch(`${baseUrl}${path}`, {
-        ...options,
-        headers,
-    });
-    const contentType = response.headers.get("content-type") || "";
-    const body = contentType.includes("application/json")
-        ? await response.json()
-        : await response.text();
-
-    if (!response.ok) {
-        apiLogger.warn({
-            statusCode: response.status,
-        }, "API request failed");
-
-        throw new Error(`API request failed with ${response.status}: ${JSON.stringify(body)}`);
-    }
-
-    apiLogger.info({
-        statusCode: response.status,
-    }, "API request completed");
-
-    return body as JsonValue;
-}
-
-function createUserHeaders(username: string) {
-    return {
-        "X-Wayfinder-User-Id": username,
-        "X-Wayfinder-Username": username,
-        "X-Wayfinder-Email": username,
-    };
-}
-
-async function postWithBearer(
-    path: string,
-    body: JsonValue,
+/**
+ * Call one MCP tool with the CIBA-approved user's token.
+ *
+ * Every post-approval write -- book, transfer the alert, cancel the old booking
+ * -- goes through the MCP server rather than the REST API, so each passes the
+ * same authorization boundary as the rest of the agent's work: the token is
+ * verified there, the tool's scopes are required, and ownership is decided by
+ * the verified subject instead of a username this process decoded from an
+ * unverified payload and put in a request header.
+ *
+ * A fresh request per approval is deliberate -- each carries a different user's
+ * token, so the agent-token MCP client built at startup must not be reused.
+ */
+async function callMcpToolWithBearer(
+    toolName: string,
+    args: Record<string, unknown>,
     bearerToken: string,
-    userHeaders: Record<string, string>,
     requestLogger: Logger,
 ) {
-    return requestApi(path, {
+    const url = getMcpServerUrl();
+    const mcpLogger = requestLogger.child({ upstream: "mcp-server", tool: toolName });
+
+    mcpLogger.info("MCP tool call started");
+
+    const response = await fetch(url, {
         method: "POST",
         headers: {
+            Accept: "application/json, text/event-stream",
             Authorization: `Bearer ${bearerToken}`,
-            ...userHeaders,
+            "Content-Type": "application/json",
         },
-        body: JSON.stringify(body),
-    }, requestLogger);
-}
+        body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: randomUUID(),
+            method: "tools/call",
+            params: { name: toolName, arguments: args },
+        }),
+    });
 
-async function patchWithBearer(
-    path: string,
-    body: JsonValue,
-    bearerToken: string,
-    userHeaders: Record<string, string>,
-    requestLogger: Logger,
-) {
-    return requestApi(path, {
-        method: "PATCH",
-        headers: {
-            Authorization: `Bearer ${bearerToken}`,
-            ...userHeaders,
-        },
-        body: JSON.stringify(body),
-    }, requestLogger);
+    if (!response.ok) {
+        mcpLogger.warn({ statusCode: response.status }, "MCP tool call failed");
+
+        throw new Error(`MCP tool ${toolName} failed with ${response.status}`);
+    }
+
+    // The streamable HTTP transport replies as SSE; the JSON-RPC envelope is
+    // carried on the first `data:` line.
+    const raw = await response.text();
+    const dataLine = raw.split("\n").find((line) => line.startsWith("data:"));
+
+    if (!dataLine) {
+        throw new Error(`MCP tool ${toolName} returned no data frame.`);
+    }
+
+    const envelope = JSON.parse(dataLine.slice(5).trim()) as {
+        error?: { message?: string };
+        result?: { isError?: boolean; content?: { text?: string }[] };
+    };
+
+    if (envelope.error) {
+        throw new Error(`MCP tool ${toolName} error: ${envelope.error.message ?? "unknown"}`);
+    }
+
+    const text = envelope.result?.content?.[0]?.text ?? "";
+
+    if (envelope.result?.isError) {
+        // insufficient_scope here means the CIBA token did not carry
+        // mcp:create_bookings -- the approval succeeded but granted too little.
+        mcpLogger.warn({ toolError: text }, "MCP tool reported an error");
+
+        throw new Error(`MCP tool ${toolName} rejected the call: ${text}`);
+    }
+
+    mcpLogger.info("MCP tool call completed");
+
+    try {
+        return JSON.parse(text) as JsonValue;
+    } catch {
+        return text as JsonValue;
+    }
 }
 
 async function postAsgardeoForm(
@@ -431,20 +425,17 @@ async function reserveBetterDealForMatch({
     }
 
     const approvedUsername = getUsernameClaimFromAccessToken(ciba.accessToken);
-    const userHeaders = createUserHeaders(approvedUsername);
-    const user = {
-        id: approvedUsername,
-        username: approvedUsername,
-    };
 
     dealLogger.info({ approvedUsername }, "Better-deal booking approved");
 
-    const booking = await postWithBearer("/api/bookings", {
+    // Booked through the MCP server with the CIBA token, so the mcp:create_bookings
+    // scope is enforced and the owner comes from the verified token. No `user` is
+    // sent: the MCP tool accepts no owner argument by design.
+    const booking = await callMcpToolWithBearer("create_booking", {
         type: "flight",
         itemId: newFlight.id,
         travelers: match.travelers ?? 1,
-        user,
-    }, ciba.accessToken, userHeaders, dealLogger);
+    }, ciba.accessToken, dealLogger);
     const createdBooking = (
         typeof booking === "object" &&
         booking !== null &&
@@ -460,21 +451,17 @@ async function reserveBetterDealForMatch({
         replacementBookingId: createdBooking.id,
     }, "Replacement booking created");
 
-    const transferredConsent = await postWithBearer("/api/deal-alert-consents/transfer", {
+    // Transfer and cancel also go through MCP with the CIBA token: ownership of
+    // both bookings is checked against the verified subject rather than against
+    // a username this process put in a request header.
+    const transferredConsent = await callMcpToolWithBearer("transfer_deal_alert_consent", {
         fromBookingId: consent.bookingId,
         toBookingId: createdBooking.id,
-        username: approvedUsername,
-    }, ciba.accessToken, userHeaders, dealLogger);
-    const canceledBooking = await patchWithBearer(
-        `/api/bookings/${encodeURIComponent(consent.bookingId)}/cancel`,
-        {
-            username: approvedUsername,
-            preserveDealAlerts: true,
-        },
-        ciba.accessToken,
-        userHeaders,
-        dealLogger,
-    );
+    }, ciba.accessToken, dealLogger);
+    const canceledBooking = await callMcpToolWithBearer("cancel_booking", {
+        bookingId: consent.bookingId,
+        preserveDealAlerts: true,
+    }, ciba.accessToken, dealLogger);
 
     dealLogger.info({
         canceledBookingId: consent.bookingId,

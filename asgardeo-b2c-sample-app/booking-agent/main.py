@@ -244,6 +244,36 @@ def _create_mcp_client(access_token: str) -> MultiServerMCPClient:
     )
 
 
+# Tools the agent has no scope of its own for. These act on the user's behalf,
+# so they carry the user's delegated (OBO) token; everything else runs on the
+# agent's own token. Keeping the split per tool -- rather than per request --
+# means browsing does not silently consume the user's authority just because
+# they authorized a booking earlier in the session.
+DELEGATED_TOOLS = {"create_booking"}
+
+
+async def _load_tools(session: UserSession):
+    """Load MCP tools, binding each to the least-privileged token that can run it.
+
+    Before consent this is simply the agent token for everything: a delegated
+    tool then fails at the MCP boundary with insufficient_scope, which the chat
+    handler turns into an OBO prompt.
+    """
+    agent_token = await agent_auth.ensure_valid_token()
+    agent_tools = await _create_mcp_client(agent_token.access_token).get_tools()
+
+    if not session.has_valid_obo:
+        return agent_tools
+
+    obo_tools = await _create_mcp_client(session.obo_token.access_token).get_tools()
+    obo_by_name = {tool.name: tool for tool in obo_tools}
+
+    return [
+        obo_by_name.get(tool.name, tool) if tool.name in DELEGATED_TOOLS else tool
+        for tool in agent_tools
+    ]
+
+
 def _extract_text(content) -> str:
     """Extract plain text from a LangChain message content."""
     if isinstance(content, str):
@@ -435,8 +465,9 @@ async def startup():
 async def chat(request: Request, session: UserSession = Depends(get_session)):
     """Process a user message through the AI agent.
 
-    Uses OBO token if available, otherwise falls back to agent token.
-    Detects auth errors and returns appropriate response types.
+    Tools run on the agent's own token except those needing the user's
+    authority, which use the OBO token once the user has granted it. Detects
+    auth errors and returns appropriate response types.
     """
     body = await request.json()
     user_message = body.get("message", "").strip()
@@ -446,17 +477,10 @@ async def chat(request: Request, session: UserSession = Depends(get_session)):
             status_code=400,
         )
 
-    # Determine which token to use for MCP calls
-    if session.has_valid_obo:
-        access_token = session.obo_token.access_token
-    else:
-        agent_token = await agent_auth.ensure_valid_token()
-        access_token = agent_token.access_token
-
-    mcp_client = _create_mcp_client(access_token)
-
     try:
-        tools = await mcp_client.get_tools()
+        # Each tool is bound to its own token: the agent's own for reads, the
+        # user's delegated token only for tools the agent cannot run alone.
+        tools = await _load_tools(session)
 
         llm = ChatGoogleGenerativeAI(model=MODEL_NAME, temperature=0.7)
         agent = create_agent(llm, tools)
