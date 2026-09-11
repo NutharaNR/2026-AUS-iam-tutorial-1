@@ -1,8 +1,16 @@
 # Travel MCP Server
 
-A simple TypeScript MCP server that wraps the Wayfinder Travel REST API.
+A TypeScript MCP server exposing the Wayfinder Travel capabilities as tools.
 
-The AI agent connects to this server over Streamable HTTP at `/mcp`. The MCP server exposes travel API capabilities as tools, including flight search, bookings, locations, and profile lookup.
+Agents connect over Streamable HTTP at `/mcp`. The server authorizes each call
+at its own boundary and then reads and writes the Wayfinder database directly,
+rather than proxying to the REST API. The REST API continues to serve the
+browser and opens the same SQLite file.
+
+```text
+agents  ──► MCP server ──► wayfinder.sqlite
+browser ──► REST API   ──┘
+```
 
 ## Tools
 
@@ -78,4 +86,31 @@ http://localhost:8000/health
 
 ## Authorization
 
-If a client sends an `Authorization` header to the MCP endpoint, the MCP server forwards that header to the REST API. This allows protected API endpoints to receive the same bearer token provided by the AI agent.
+Set `MCP_REQUIRE_AUTH=true` to enforce authorization at the MCP boundary. Every
+tool call then requires a bearer token, which is verified against the identity
+provider's JWKS: signature, issuer, audience and expiry. The token is verified
+once per session no matter how many tools are called.
+
+Two distinct failures are reported to the caller:
+
+| Result | Meaning |
+| --- | --- |
+| `invalid_token` | The token failed verification — bad signature, wrong issuer, wrong audience, or expired. |
+| `insufficient_scope` | The token is valid but lacks a scope the tool requires. |
+
+Only the code is returned; the reason is deliberately not disclosed, since it
+can describe the token.
+
+`ASGARDEO_AUDIENCE` must name the API resource the `mcp:*` scopes are registered
+on, and the agents must request that same resource when obtaining their tokens
+(`AGENT_RESOURCE` / `OBO_RESOURCE`). The resource chosen at token-request time
+decides both which scopes are granted and the token's audience, so a mismatch
+surfaces as `invalid_token` rather than `insufficient_scope`.
+
+Unlike the REST API's check, roles and permissions are **not** pooled into the
+scope set here: a role name never stands in for a granted scope at this
+boundary, and all required scopes must be present, not just one of them.
+
+When `MCP_REQUIRE_AUTH=false` (the default) tools run without authorization.
+That is for local demos only — nothing in that mode is an authorization
+decision.

@@ -24,10 +24,10 @@ This repository currently contains the Wayfinder B2C application and Verifiable 
 ├── README.md                         # Main tutorial guide (this file)
 ├── asgardeo-b2c-sample-app/          # Wayfinder B2C sample application
 │   ├── frontend/                     # End-user web experience
-│   ├── api/                          # Backend APIs and business logic
-│   ├── ai-agent/                     # AI agent related components
-│   ├── mcp/                          # MCP integrations
-│   ├── e2e/                          # End-to-end tests
+│   ├── api/                          # Backend APIs serving the browser
+│   ├── mcp/                          # MCP server: the agents' authorization boundary
+│   ├── booking-agent/                # Interactive agent, OBO delegation
+│   ├── ambient-agent/                # Background agent, CIBA approval
 │   └── README.md                     # B2C app specific instructions
 └── vc-verifier/                      # OID4VP verifier demo used in the VC section
     ├── app/                          # Next.js App Router pages and API routes
@@ -63,8 +63,24 @@ Documentation: https://wso2.com/asgardeo/docs/guides/applications/register-singl
     | Read Bookings | bookings:read |
     | Create Bookings | bookings:create |
     | Record Deal Alert Consents | deal-alert-consents:write |
+    | Search Flights (MCP) | mcp:search_flights |
+    | Get Locations (MCP) | mcp:get_locations |
+    | Create Bookings (MCP) | mcp:create_bookings |
+    | Read Deal Alert Consents (MCP) | mcp:deal-alert-consents:read |
+    | Write Deal Alert Consents (MCP) | mcp:deal-alert-consents:write |
 
     Check `Requires authorization`
+
+The un-prefixed scopes protect the REST API, which serves the browser. The
+`mcp:` scopes protect the MCP server, which is how the agents reach the same
+data. They are separate scope sets on purpose: a token minted for one path does
+not satisfy the other.
+
+The identifier above (`https://api.wayfinderapp.com`) is the value that must go
+in the agents' `AGENT_RESOURCE` / `OBO_RESOURCE` and the MCP server's
+`ASGARDEO_AUDIENCE`. If those name a resource Asgardeo does not recognise for
+the application, the `resource` parameter is silently ignored — the token is
+issued with the wrong audience and the `mcp:*` scopes are dropped.
 
 ### 3. Edit Application
 
@@ -345,6 +361,30 @@ For the background AI agent, enable the CIBA grant type in the associated applic
 - Click SMS and Email as Allowed Notification Delivery Methods
 - Click Update.
 
+#### Authorize the API resource on the agent applications
+
+Both agent applications must be subscribed to the WayFinder API resource, or
+their tokens come back without the `mcp:*` scopes and the MCP server rejects
+them.
+
+- Open each agent's associated application.
+- Go to the **API Authorization** tab.
+- Subscribe to the **WayFinder API** resource.
+- Select the scopes that agent needs.
+
+Then grant the scopes to the right identities. Agent and user needs differ:
+
+| Identity | Scopes | Why |
+| --- | --- | --- |
+| Interactive agent | `mcp:search_flights`, `mcp:get_locations` | browsing, done alone |
+| Background agent | `mcp:deal-alert-consents:read` | reading the watch list |
+| Users | all of the above plus `mcp:create_bookings`, `mcp:deal-alert-consents:write`, and the un-prefixed REST scopes | anything that acts on their behalf |
+
+Neither agent is granted `mcp:create_bookings`. That is deliberate: booking
+requires the user's authority, obtained through OBO for the interactive agent
+and CIBA for the background one. Granting it to an agent's role would let it
+book unattended and defeat the demonstration.
+
 ## Setup the applications
 
 Follow README.md files in:
@@ -352,5 +392,9 @@ Follow README.md files in:
 - [asgardeo-b2c-sample-app/frontend/README.md](asgardeo-b2c-sample-app/frontend/README.md)
 - [asgardeo-b2c-sample-app/api/README.md](asgardeo-b2c-sample-app/api/README.md)
 - [asgardeo-b2c-sample-app/mcp/README.md](asgardeo-b2c-sample-app/mcp/README.md)
-- [asgardeo-b2c-sample-app/ai-agent/README.md](asgardeo-b2c-sample-app/ai-agent/README.md)
+- [asgardeo-b2c-sample-app/booking-agent/README.md](asgardeo-b2c-sample-app/booking-agent/README.md)
+- [asgardeo-b2c-sample-app/ambient-agent/README.md](asgardeo-b2c-sample-app/ambient-agent/README.md)
 - [vc-verifier/README.md](vc-verifier/README.md)
+
+Start them in this order: API, MCP server, agents, frontend. The API and the MCP
+server both open the same SQLite database, so seed it once from `api/`.

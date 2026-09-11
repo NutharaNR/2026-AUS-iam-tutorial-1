@@ -93,13 +93,47 @@ The server accepts the event immediately:
 }
 ```
 
-## Acting as Itself
+## Two Levels of Authority
 
-The better-deal monitoring flow uses the agent's own Asgardeo agent token to call protected MCP tools such as `list_deal_alert_consents`. The agent application must be authorized to request the Wayfinder API scope used by this tool, for example `deal-alert-consents:read`; otherwise the REST API can reject the forwarded token because the token audience does not include the Wayfinder API.
+The agent carries two deliberately unequal kinds of authority.
+
+**Its own**, obtained from its agent credentials with `AGENT_SCOPES`, covers
+only looking: reading the watch list via `list_deal_alert_consents`, which needs
+`mcp:deal-alert-consents:read`. Nothing it can do alone changes anything or
+costs anyone money. `AGENT_RESOURCE` must name the API resource the `mcp:*`
+scopes are registered on, or the token is issued for the wrong audience and the
+MCP server rejects it with `invalid_token`.
+
+**Borrowed**, obtained per user per action through CIBA, covers acting: booking
+the better flight, moving the alert, and cancelling the old booking. It does not
+exist until that user approves on their device, and is gone afterwards.
+
+This split matters because the agent runs unsupervised. If booking were part of
+its standing permissions, any failure — a bug in the matching logic, a bad price
+— could spend real money across every watcher at once.
+
+### Post-approval actions
+
+All three writes go through the MCP server with the CIBA token, so each passes
+the same authorization boundary as the reads, and the booking owner is taken
+from the verified token rather than from a request header:
+
+| Action | Tool | Scope |
+| --- | --- | --- |
+| Book the better flight | `create_booking` | `mcp:create_bookings` |
+| Move the alert to it | `transfer_deal_alert_consent` | `mcp:deal-alert-consents:write` |
+| Cancel the old booking | `cancel_booking` | `mcp:create_bookings` |
+
+`CIBA_SCOPE` must therefore carry `mcp:create_bookings` and
+`mcp:deal-alert-consents:write`, granted to the **user's** role — not the
+agent's.
 
 The native CIBA tool uses `CLIENT_ID` and `CLIENT_SECRET` for Asgardeo CIBA endpoint authorization, and passes the ambient agent access token as `actor_token` in the CIBA authorization request. Configure `ASGARDEO_BASE_URL`, `CIBA_SCOPE`, `CIBA_NOTIFICATION_CHANNEL`, `CIBA_POLL_INTERVAL_SECONDS`, and `CIBA_POLL_TIMEOUT_MS` in the ambient agent environment as needed. Set `CIBA_LOG_AUTH_URL=true` only for local debugging when you need to inspect an `auth_url` returned by Asgardeo.
 
 ## Notes
 
-- The MCP server must accept `Authorization: Bearer <agent-access-token>`.
+- The MCP server must accept `Authorization: Bearer <agent-access-token>`, and
+  its `ASGARDEO_AUDIENCE` must match the resource the agent requests.
+- The `POST /deal-alerts` webhook is unauthenticated: it is an internal callback
+  from the REST API and should not be exposed publicly.
 - The sample is intended for local demos and development. Do not commit real agent secrets, API keys, or local `.env` files.

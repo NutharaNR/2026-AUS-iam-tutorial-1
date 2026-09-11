@@ -8,6 +8,36 @@ user consent to create bookings.
 
 The service runs locally on `http://localhost:5001` by default.
 
+## Tokens
+
+Three different tokens are involved, and it is worth keeping them apart.
+
+| Token | Client app | Proves | Used for |
+| --- | --- | --- | --- |
+| User login | SPA (`VITE_ASGARDEO_CLIENT_ID`) | the user, to this service | authenticating `/api/chat`; never forwarded to MCP |
+| Agent | MCP client (`ASGARDEO_CLIENT_ID`) | the agent itself | reads: `search_flights`, `get_locations` |
+| OBO | MCP client (`ASGARDEO_CLIENT_ID`) | the user, agent as actor | `create_booking` |
+
+The browser sends the user's login token; this service validates it against
+`TOKEN_AUDIENCE`, identifies the session, and then obtains its **own** token to
+call the MCP server. The user's login token is never passed onward.
+
+The OBO token is issued against the MCP client application, not the SPA — in
+that exchange the agent is the OAuth client, the user is the subject, and the
+agent is recorded as the actor.
+
+### How a booking gets authorized
+
+1. The user asks to book. The agent calls `create_booking` with its own token.
+2. The MCP server rejects it with `insufficient_scope` — the agent has no
+   `mcp:create_bookings` scope of its own.
+3. The service returns `obo_required`; the widget opens the consent popup.
+4. The user approves, and the agent receives an OBO token carrying their
+   authority.
+5. The booking is retried on the OBO token and succeeds.
+
+Reads continue on the agent's own token throughout, including after consent.
+
 ## Asgardeo Configuration
 
 Before running the agent, configure the following items in your Asgardeo
@@ -75,20 +105,36 @@ http://localhost:5001/api/obo/callback
 
 ### 4. Configure scopes and API resource
 
-Create or reuse the API resource used by the WayFinder MCP server. This sample
-expects the resource identifier to be `booking_api` unless you change the
-environment variables.
+Create or reuse the API resource that the MCP server's `mcp:*` scopes are
+registered on. Three settings must all name that same resource:
+
+| Setting | Where |
+| --- | --- |
+| `AGENT_RESOURCE` | this service — the agent's own token |
+| `OBO_RESOURCE` | this service — the delegated token |
+| `ASGARDEO_AUDIENCE` | `mcp/.env` — what the MCP server accepts |
+
+The resource chosen at token-request time decides both which scopes are granted
+and the token's audience. If it names a resource Asgardeo does not recognise for
+this application, the parameter is **silently ignored**: the token comes back
+with the default audience and the `mcp:*` scopes dropped, and the MCP server
+rejects it with `invalid_token`.
 
 The default local scopes are:
 
 ```bash
-AGENT_SCOPES="openid profile bookings:read"
-OBO_SCOPES="openid profile bookings:read bookings:write"
-OBO_RESOURCE=booking_api
+AGENT_SCOPES="openid profile mcp:search_flights mcp:get_locations"
+OBO_SCOPES="openid profile mcp:create_bookings"
 ```
 
-Grant read scopes to the agent for basic MCP access. Grant write scopes to the
-roles/users that should be allowed to create bookings through the OBO flow.
+These are deliberately disjoint. `AGENT_SCOPES` is what the agent may do alone —
+browsing only — and must be granted to the **agent's** role. `OBO_SCOPES` is what
+the agent may do on a user's behalf, and must be granted to the **user's** role;
+the agent does not need it.
+
+Tools are bound to the least-privileged token that can run them, per call rather
+than per request, so searching flights keeps using the agent's own token even
+after the user has authorized a booking.
 
 ## Local Setup
 
@@ -115,9 +161,10 @@ OBO_REDIRECT_URI=http://localhost:5001/api/obo/callback
 GOOGLE_API_KEY=<google-ai-studio-api-key>
 MODEL_NAME=gemini-3.1-flash-lite
 WAYFINDER_MCP_SERVER_URL=http://localhost:8000/mcp
-AGENT_SCOPES=openid profile bookings:read
-OBO_SCOPES=openid profile bookings:read bookings:write
-OBO_RESOURCE=booking_api
+AGENT_SCOPES=openid profile mcp:search_flights mcp:get_locations
+OBO_SCOPES=openid profile mcp:create_bookings
+AGENT_RESOURCE=<mcp-api-resource-identifier>
+OBO_RESOURCE=<mcp-api-resource-identifier>
 ```
 
 Do not commit `.env` files with real client secrets, agent secrets, or LLM API

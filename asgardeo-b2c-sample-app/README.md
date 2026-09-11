@@ -7,27 +7,26 @@ This repository contains a sample B2C travel booking application secured with As
 ```text
 asgardeo-b2c-sample-app/
 ├── frontend/        React + Vite web application
-├── api/             Node.js REST API
-├── mcp/             TypeScript MCP server that wraps the REST API
-├── ai-agent/        LangChain WebSocket agent with Asgardeo agent authentication
+├── api/             Node.js REST API, serving the browser
+├── mcp/             TypeScript MCP server, the agents' authorization boundary
+├── booking-agent/   Python LangGraph agent with OBO delegation
+├── ambient-agent/   TypeScript agent with CIBA approval for offline actions
 ```
+
+Both the REST API and the MCP server open the same SQLite database. The browser
+goes through the REST API; the agents go through the MCP server.
 
 ### Quick Setup
 
-Run the API, frontend, MCP server and AI agent (in that order) in separate terminals as needed.
+Run these in separate terminals, in this order. Seed the database once from
+`api/` — the MCP server reads the same file and will not start without it.
+
+API:
 
 ```bash
 cd api
 npm install
 npm run seed
-npm run dev
-```
-
-Frontend:
-
-```bash
-cd frontend
-npm install
 npm run dev
 ```
 
@@ -39,10 +38,27 @@ npm install
 npm run dev
 ```
 
-AI agent:
+Booking agent:
 
 ```bash
-cd ai-agent
+cd booking-agent
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python main.py
+```
+
+Ambient agent:
+
+```bash
+cd ambient-agent
+npm install
+npm run dev
+```
+
+Frontend:
+
+```bash
+cd frontend
 npm install
 npm run dev
 ```
@@ -80,27 +96,45 @@ See `api/README.md` for setup, database seeding, and local run instructions.
 
 ### MCP Server
 
-The `mcp/` app exposes the REST API as MCP tools for the AI agent.
+The `mcp/` app exposes the travel capabilities as MCP tools for the agents.
 
 Features:
 
-- Wrap flight, location, booking, and profile API endpoints as MCP tools
+- Expose flight, location, booking, and deal-alert capabilities as MCP tools
 - Serve MCP requests over Streamable HTTP at `/mcp`
-- Forward the incoming `Authorization` header to the REST API
+- Verify the bearer token and enforce a per-tool scope check at the MCP boundary
+- Read and write the Wayfinder database in process, so the identity that
+  performed an action is the one the token proved
 
-See `mcp/README.md` for setup, tools, and local run instructions.
+See `mcp/README.md` for setup, tools, scopes, and local run instructions.
 
-### AI Agent
+### Booking Agent
 
-The `ai-agent/` app provides a sample AI agent that demonstrates authenticating AI agents with Asgardeo.
+The `booking-agent/` app is the interactive concierge the user chats with.
 
 Features:
 
-- Access MCP tools and API resources with AI agent's own identity using it's agent credentials
-- Multi LLM provider support
-- Websocket chat interface over `/chat` endpoint
+- Reach MCP tools with the agent's own identity using its agent credentials
+- Escalate to the user's authority through the on-behalf-of (OBO) flow when a
+  tool needs more than the agent holds
+- Bind each tool to the least-privileged token that can run it, so browsing
+  keeps using the agent's own token even after the user authorizes a booking
 
-See `ai-agent/README.md` for setup, environment variables, and local run instructions.
+See `booking-agent/README.md` for setup, environment variables, and local run instructions.
+
+### Ambient Agent
+
+The `ambient-agent/` app watches for better deals while the user is offline.
+
+Features:
+
+- Scan enabled deal-alert consents with the agent's own identity
+- Ask the user to approve a rebooking through CIBA, which pushes a notification
+  to their device
+- Perform the approved booking, alert transfer, and cancellation through MCP
+  with the CIBA token
+
+See `ambient-agent/README.md` for setup, environment variables, and local run instructions.
 
 The API, MCP server, AI agent, and frontend dev commands all watch source files and reload on code changes.
 
